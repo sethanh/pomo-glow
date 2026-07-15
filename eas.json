@@ -1,0 +1,31 @@
+{
+  "cli": {
+    "version": ">= 16.4.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal"
+    },
+    "preview": {
+      "distribution": "internal"
+    },
+    "production": {
+      "autoIncrement": true,
+      "env": {
+        "ENVFILE": ".env.production"
+      },
+      "channel": "production"
+    }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "appleId": "hanctnet@gmail.com",
+        "ascAppId": "6744683718",
+        "appleTeamId": "J3YAF8LN9G"
+      }
+    }
+  }
+}
