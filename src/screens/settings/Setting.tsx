@@ -1,17 +1,16 @@
-import { StyleSheet, TextInput, KeyboardAvoidingView, Platform, ActivityIndicator, Alert } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useState, useEffect, useCallback } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
-import { AnimatedIcon } from '@/components/animated-icon';
+import { TextInputField } from '@/components';
+import { AppButton } from '@/components/buttons';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Spacing } from '@/constants/theme';
 import { BREAK_KEY, FOCUS_KEY } from '@/constants';
+import { Spacing } from '@/constants/theme';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Image } from 'expo-image';
 import { useFocusEffect } from 'expo-router';
-import {TextInputField } from '@/components';
-import { AppButton } from '@/components/buttons';
-import { FormBase } from 'react-hook-form-base'
+import { useCallback, useState } from 'react';
+import { FormBase } from 'react-hook-form-base';
+import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, StyleSheet } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 interface SettingValue {
   focusTime: number;
@@ -19,7 +18,7 @@ interface SettingValue {
 }
 
 
-export default function SettingScreen() {
+export function SettingScreen() {
   const [settings, setSettings] = useState<SettingValue>({
     breakTime: 0,
     focusTime: 0
@@ -87,15 +86,15 @@ export default function SettingScreen() {
           keyboardVerticalOffset={0}
         >
           <ThemedView style={styles.tomatoContainer}>
-            {/* <AnimatedIcon /> */}
           </ThemedView>
 
           <ThemedView style={styles.stepContainer}>
+                        <Image style={styles.image} source={require('@/assets/images/pomo.png')} />
             <ThemedText type="code" style={styles.title}>
               POMODORO
             </ThemedText>
             <FormBase
-              onSubmit={(value)=>{console.log(value)}}
+              onSubmit={saveSettings}
               defaultValues={{...settings}}
             >
               {(_, onHandleSubmit) => {
@@ -200,5 +199,9 @@ const styles = StyleSheet.create({
   },
   labelInput: {
     textAlign: 'left'
-  }
+  },
+  image: {
+    width: 76,
+    height: 71,
+  },
 });

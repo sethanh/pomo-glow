@@ -1,18 +1,21 @@
-import { DefaultTheme, ThemeProvider } from 'expo-router';
-import * as SplashScreen from 'expo-splash-screen';
+import { DefaultTheme, Stack, ThemeProvider } from "expo-router";
 
-import { AnimatedSplashOverlay } from '@/components/animated-icon';
-import AppTabs from '@/components/app-tabs';
+import { AnimatedSplashOverlay } from "@/components/animated-icon";
 
-SplashScreen.preventAutoHideAsync();
-
-export default function TabLayout() {
-  // const colorScheme = useColorScheme();
+export default function RootLayout() {
   return (
-    // <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
     <ThemeProvider value={DefaultTheme}>
       <AnimatedSplashOverlay />
-      <AppTabs />
+
+      <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen
+          name="(popup)"
+          options={{
+            presentation: "modal",
+          }}
+        />
+      </Stack>
     </ThemeProvider>
   );
 }

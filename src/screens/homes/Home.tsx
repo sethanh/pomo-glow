@@ -1,19 +1,20 @@
-import { Platform, StyleSheet, AppState } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useState, useEffect, useRef, useCallback } from 'react';
 import { useAudioPlayer } from 'expo-audio';
-import * as TaskManager from 'expo-task-manager';
 import * as BackgroundFetch from 'expo-background-fetch';
 import * as Notifications from 'expo-notifications';
+import * as TaskManager from 'expo-task-manager';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { AppState, Platform, StyleSheet } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { AnimatedIcon } from '@/components/animated-icon';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { WebBadge } from '@/components/web-badge';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { BREAK_KEY, FOCUS_KEY } from '@/constants';
+import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { addHistorySession, getDailyProgress, increaseAchievementProgress, increaseCompletedSessions, increaseStreak } from '@/hooks';
+import { increaseWeeklyCompleted } from '@/hooks/week-storage';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from 'expo-router';
+import { DailyGoalCard, Header } from './containers';
 
 // Định nghĩa Task Name
 const BACKGROUND_TIMER_TASK = 'pomodoro-background-timer';
@@ -28,10 +29,12 @@ TaskManager.defineTask(BACKGROUND_TIMER_TASK, async () => {
   }
 });
 
-export default function HomeScreen() {
+export function HomeScreen() {
   const [timeLeft, setTimeLeft] = useState(0);
   const [focusTime, setFocusTime] = useState(25);
   const [breakTime, setBreakTime] = useState(5);
+  const [goal, setGoal] = useState(5);
+  const [completed, setCompleted] = useState(0);
   const [isFocus, setIsFocus] = useState(true);
   const [isRunning, setIsRunning] = useState(false);
   const [isFinished, setIsFinished] = useState(true);
@@ -41,6 +44,13 @@ export default function HomeScreen() {
 
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastBackgroundTimeRef = useRef<number>(Date.now());
+
+  const loadGoal = useCallback(async () => {
+    const progress = await getDailyProgress();
+
+    setGoal(progress.goal);
+    setCompleted(progress.completed);
+  }, []);
 
   // Register background task
   useEffect(() => {
@@ -69,7 +79,7 @@ export default function HomeScreen() {
       if (nextAppState === 'active' && isRunning) {
         const now = Date.now();
         const secondsPassed = Math.floor((now - lastBackgroundTimeRef.current) / 1000);
-        
+
         if (secondsPassed > 0 && timeLeft > 0) {
           const newTimeLeft = Math.max(0, timeLeft - secondsPassed);
           setTimeLeft(newTimeLeft);
@@ -88,21 +98,53 @@ export default function HomeScreen() {
   }, [isRunning, timeLeft]);
 
   const handleTimerComplete = useCallback(() => {
+    finishPlayer.seekTo(0);
+    finishPlayer.play();
+
     setIsFinished(true);
     const nextIsFocus = !isFocus;
+    const now = new Date();
+
+    if (isFocus) {
+      increaseCompletedSessions();
+      increaseWeeklyCompleted();
+      increaseAchievementProgress( "session");
+      addHistorySession({
+        title: now.toISOString().slice(0, 10), // YYYY-MM-DD
+        duration: focusTime,
+        startedAt: now.toISOString(),
+        type:'focus',
+        status: 'completed'
+      });
+
+      let currentGoal = goal + 1;
+      if (currentGoal == completed) {
+        increaseStreak();
+        increaseAchievementProgress("streak");
+      }
+      setGoal(currentGoal);
+    }
+
+    if (!focusTime) {
+      addHistorySession({
+        title: now.toISOString().slice(0, 10), // YYYY-MM-DD
+        duration: focusTime,
+        startedAt: now.toISOString(),
+        type: 'shortBreak',
+        status: 'completed'
+      });
+    }
+
     const nextTime = nextIsFocus ? focusTime * 60 : breakTime * 60;
 
     setTimeLeft(nextTime);
     setIsFocus(nextIsFocus);
 
-    finishPlayer.seekTo(0);
-    finishPlayer.play();
-
     Notifications.scheduleNotificationAsync({
       content: {
         title: nextIsFocus ? 'Focus Time!' : 'Break Time!',
-        body: nextIsFocus ? "Let's focus again! 💪" 
-        : "Time to take a break 🎉",
+        body: nextIsFocus ? "Let's focus again! 💪"
+          : "Time to take a break 🎉",
       },
       trigger: null,
     });
@@ -132,6 +174,7 @@ export default function HomeScreen() {
         }
       };
 
+      loadGoal();
       loadSettings();
     }, [isRunning, isFinished, isFocus])
   );
@@ -152,6 +195,14 @@ export default function HomeScreen() {
   }, [tickPlayer]);
 
   const skipRelax = useCallback(() => {
+    const now = new Date();
+    addHistorySession({
+        title: now.toISOString().slice(0, 10), // YYYY-MM-DD
+        duration: focusTime,
+        startedAt: now.toISOString(),
+        type:'shortBreak',
+        status: 'skipped'
+    });
     setTimeLeft(focusTime * 60);
     setIsFocus(true);
     setIsFinished(false);
@@ -178,7 +229,8 @@ export default function HomeScreen() {
         }
 
         if (isFocus) {
-          tickPlayer.seekTo(0).catch(() => {});
+          tickPlayer.seekTo(0).catch(() => { });
+          tickPlayer.volume = 0.4;
           tickPlayer.play();
         }
         return prev - 1;
@@ -199,18 +251,19 @@ export default function HomeScreen() {
   const buttonText = isRunning && isFocus
     ? 'Pause'
     : isRunning && !isFocus
-    ? 'Skip'
-    : !isFocus && isFinished
-    ? 'Break'
-    : isFocus && !isRunning && !isFinished
-    ? 'Resume'
-    : 'Play';
+      ? 'Skip'
+      : !isFocus && isFinished
+        ? 'Break'
+        : isFocus && !isRunning && !isFinished
+          ? 'Resume'
+          : 'Play';
 
   return (
     <ThemedView style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
         <ThemedView style={styles.heroSection}>
-          <AnimatedIcon />
+          <Header />
+          <DailyGoalCard completed={completed} goal={goal} />
         </ThemedView>
 
         <ThemedText type="code" style={styles.code}>
@@ -241,7 +294,12 @@ export default function HomeScreen() {
           </ThemedText>
         </ThemedView>
 
-        {Platform.OS === 'web' && <WebBadge />}
+        {/* <TodaySummaryCard
+          sessions={6}
+          focusMinutes={150}
+          streak={7}
+          goalPercent={60}
+        /> */}
       </SafeAreaView>
     </ThemedView>
   );
@@ -262,6 +320,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     flex: 1,
     paddingHorizontal: Spacing.four,
+    gap: 2
   },
   code: {
     textTransform: 'uppercase',
