@@ -1,32 +1,33 @@
-import { useAudioPlayer } from 'expo-audio';
-import * as BackgroundFetch from 'expo-background-fetch';
+import { AudioModule, useAudioPlayer } from 'expo-audio';
 import * as Notifications from 'expo-notifications';
-import * as TaskManager from 'expo-task-manager';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AppState, Platform, StyleSheet } from 'react-native';
+import { AppState, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { BREAK_KEY, FOCUS_KEY } from '@/constants';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
-import { addHistorySession, getDailyProgress, increaseAchievementProgress, increaseCompletedSessions, increaseStreak } from '@/hooks';
+import {
+  addHistorySession,
+  getDailyProgress,
+  increaseAchievementProgress,
+  increaseCompletedSessions,
+  increaseStreak,
+} from '@/hooks';
 import { increaseWeeklyCompleted } from '@/hooks/week-storage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from 'expo-router';
 import { DailyGoalCard, Header } from './containers';
 
-// Định nghĩa Task Name
-const BACKGROUND_TIMER_TASK = 'pomodoro-background-timer';
-
-TaskManager.defineTask(BACKGROUND_TIMER_TASK, async () => {
-  try {
-    // Logic chạy ngầm (có thể cập nhật AsyncStorage hoặc gửi notification)
-    console.log('Background task running...');
-    return BackgroundFetch.BackgroundFetchResult.NewData;
-  } catch (error) {
-    return BackgroundFetch.BackgroundFetchResult.Failed;
-  }
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+    shouldShowBanner: true,
+    shouldShowList: true,
+  }),
 });
 
 export function HomeScreen() {
@@ -39,130 +40,141 @@ export function HomeScreen() {
   const [isRunning, setIsRunning] = useState(false);
   const [isFinished, setIsFinished] = useState(true);
 
-  const tickPlayer = useAudioPlayer(require('@/assets/sounds/tick.mp3'));
   const finishPlayer = useAudioPlayer(require('@/assets/sounds/finish.mp3'));
 
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
-  const lastBackgroundTimeRef = useRef<number>(Date.now());
+  const endTimeRef = useRef<number | null>(null); // thời điểm kết thúc (timestamp)
+  const notificationIdRef = useRef<string | null>(null);
 
-  const loadGoal = useCallback(async () => {
-    const progress = await getDailyProgress();
-
-    setGoal(progress.goal);
-    setCompleted(progress.completed);
-  }, []);
-
-  // Register background task
+  // Cho phép phát âm thanh khi ở chế độ im lặng
   useEffect(() => {
-    const registerBackgroundTask = async () => {
-      await BackgroundFetch.registerTaskAsync(BACKGROUND_TIMER_TASK, {
-        minimumInterval: 1, // 1 giây
-        stopOnTerminate: false,
-        startOnBoot: true,
-      });
-    };
-
-    if (Platform.OS !== 'web') {
-      registerBackgroundTask();
-    }
-
-    return () => {
-      if (Platform.OS !== 'web') {
-        BackgroundFetch.unregisterTaskAsync(BACKGROUND_TIMER_TASK);
-      }
-    };
+    AudioModule.setAudioModeAsync({
+      playsInSilentMode: true,
+      interruptionMode: 'mixWithOthers',
+    });
   }, []);
 
-  // Xử lý khi app vào foreground sau khi bị khoá
+  // Xin quyền notification
+  useEffect(() => {
+    (async () => {
+      const { status } = await Notifications.requestPermissionsAsync();
+      if (status !== 'granted') {
+        console.log('Notification permission not granted');
+      }
+    })();
+  }, []);
+
+  // Xử lý khi app vào / ra background
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextAppState) => {
-      if (nextAppState === 'active' && isRunning) {
+      if (nextAppState === 'active' && isRunning && endTimeRef.current) {
         const now = Date.now();
-        const secondsPassed = Math.floor((now - lastBackgroundTimeRef.current) / 1000);
+        const remaining = Math.max(0, Math.floor((endTimeRef.current - now) / 1000));
 
-        if (secondsPassed > 0 && timeLeft > 0) {
-          const newTimeLeft = Math.max(0, timeLeft - secondsPassed);
-          setTimeLeft(newTimeLeft);
+        setTimeLeft(remaining);
 
-          if (newTimeLeft === 0) {
-            // Hoàn thành khi quay lại foreground
-            handleTimerComplete();
-          }
+        if (remaining === 0) {
+          handleTimerComplete();
         }
-      } else if (nextAppState === 'background' && isRunning) {
-        lastBackgroundTimeRef.current = Date.now();
       }
     });
 
     return () => subscription.remove();
-  }, [isRunning, timeLeft]);
+  }, [isRunning]);
 
-  const handleTimerComplete = useCallback(() => {
-    finishPlayer.seekTo(0);
-    finishPlayer.play();
+  const cancelScheduledNotification = async () => {
+    if (notificationIdRef.current) {
+      await Notifications.cancelScheduledNotificationAsync(notificationIdRef.current);
+      notificationIdRef.current = null;
+    }
+  };
 
+  const scheduleEndNotification = async (seconds: number, nextIsFocus: boolean) => {
+    await cancelScheduledNotification();
+
+    const id = await Notifications.scheduleNotificationAsync({
+      content: {
+        title: nextIsFocus ? 'Break Time!' : 'Focus Time!',
+        body: nextIsFocus
+          ? 'Time to take a break 🎉'
+          : "Let's focus again! 💪",
+        sound: 'finish.mp3', // tên file trong assets/sounds (đã khai báo trong app.json)
+      },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+        seconds: seconds,
+        repeats: false,
+      },
+    });
+
+    notificationIdRef.current = id;
+  };
+
+  const handleTimerComplete = useCallback(async () => {
+    // Phát âm thanh nếu app đang mở
+    try {
+      finishPlayer.seekTo(0);
+      finishPlayer.play();
+    } catch (e) {}
+
+    setIsRunning(false);
     setIsFinished(true);
+    endTimeRef.current = null;
+    await cancelScheduledNotification();
+
     const nextIsFocus = !isFocus;
     const now = new Date();
 
     if (isFocus) {
       increaseCompletedSessions();
       increaseWeeklyCompleted();
-      increaseAchievementProgress( "session");
+      increaseAchievementProgress('session');
       addHistorySession({
-        title: now.toISOString().slice(0, 10), // YYYY-MM-DD
+        title: now.toISOString().slice(0, 10),
         duration: focusTime,
         startedAt: now.toISOString(),
-        type:'focus',
-        status: 'completed'
+        type: 'focus',
+        status: 'completed',
       });
 
-      let currentGoal = goal + 1;
-      if (currentGoal == completed) {
-        increaseStreak();
-        increaseAchievementProgress("streak");
-      }
-      setGoal(currentGoal);
-    }
+      const newCompleted = completed + 1;
+      setCompleted(newCompleted);
 
-    if (!focusTime) {
+      if (newCompleted >= goal) {
+        increaseStreak();
+        increaseAchievementProgress('streak');
+      }
+    } else {
       addHistorySession({
-        title: now.toISOString().slice(0, 10), // YYYY-MM-DD
-        duration: focusTime,
+        title: now.toISOString().slice(0, 10),
+        duration: breakTime,
         startedAt: now.toISOString(),
         type: 'shortBreak',
-        status: 'completed'
+        status: 'completed',
       });
     }
 
     const nextTime = nextIsFocus ? focusTime * 60 : breakTime * 60;
-
     setTimeLeft(nextTime);
     setIsFocus(nextIsFocus);
-
-    Notifications.scheduleNotificationAsync({
-      content: {
-        title: nextIsFocus ? 'Focus Time!' : 'Break Time!',
-        body: nextIsFocus ? "Let's focus again! 💪"
-          : "Time to take a break 🎉",
-      },
-      trigger: null,
-    });
-  }, [isFocus, focusTime, breakTime, finishPlayer]);
+  }, [isFocus, focusTime, breakTime, finishPlayer, completed, goal]);
 
   // Load settings
   useFocusEffect(
     useCallback(() => {
       const loadSettings = async () => {
         try {
-          const [savedFocus, savedBreak] = await Promise.all([
+          const [savedFocus, savedBreak, progress] = await Promise.all([
             AsyncStorage.getItem(FOCUS_KEY),
             AsyncStorage.getItem(BREAK_KEY),
+            getDailyProgress(),
           ]);
 
           const newFocus = parseInt(savedFocus || '25', 10);
           const newBreak = parseInt(savedBreak || '5', 10);
 
+          setGoal(progress.goal);
+          setCompleted(progress.completed);
           setFocusTime(newFocus);
           setBreakTime(newBreak);
 
@@ -173,40 +185,49 @@ export function HomeScreen() {
           console.error('Load settings failed:', e);
         }
       };
-
-      loadGoal();
       loadSettings();
-    }, [isRunning, isFinished, isFocus])
+    }, [isFinished, isFocus])
   );
 
-  const startCountdown = useCallback(() => {
+  const startCountdown = useCallback(async () => {
+    const seconds = timeLeft > 0 ? timeLeft : (isFocus ? focusTime : breakTime) * 60;
+
+    setTimeLeft(seconds);
     setIsRunning(true);
     setIsFinished(false);
-    lastBackgroundTimeRef.current = Date.now();
-  }, []);
 
-  const stopCountdown = useCallback(() => {
+    endTimeRef.current = Date.now() + seconds * 1000;
+
+    // Schedule notification chính xác
+    await scheduleEndNotification(seconds, !isFocus);
+  }, [timeLeft, isFocus, focusTime, breakTime]);
+
+  const stopCountdown = useCallback(async () => {
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
     }
-    tickPlayer.pause();
     setIsRunning(false);
-  }, [tickPlayer]);
+    endTimeRef.current = null;
+    await cancelScheduledNotification();
+  }, []);
 
-  const skipRelax = useCallback(() => {
+  const skipRelax = useCallback(async () => {
+    await stopCountdown();
+
     const now = new Date();
     addHistorySession({
-        title: now.toISOString().slice(0, 10), // YYYY-MM-DD
-        duration: focusTime,
-        startedAt: now.toISOString(),
-        type:'shortBreak',
-        status: 'skipped'
+      title: now.toISOString().slice(0, 10),
+      duration: breakTime,
+      startedAt: now.toISOString(),
+      type: 'shortBreak',
+      status: 'skipped',
     });
+
     setTimeLeft(focusTime * 60);
     setIsFocus(true);
     setIsFinished(false);
-  }, [focusTime]);
+  }, [focusTime, breakTime, stopCountdown]);
 
   const toggleCountdown = useCallback(() => {
     if (isRunning) {
@@ -216,7 +237,7 @@ export function HomeScreen() {
     return startCountdown();
   }, [isRunning, isFocus, skipRelax, stopCountdown, startCountdown]);
 
-  // Main interval (chỉ chạy khi foreground)
+  // Interval chỉ chạy khi app đang foreground
   useEffect(() => {
     if (!isRunning) return;
 
@@ -227,12 +248,6 @@ export function HomeScreen() {
           handleTimerComplete();
           return 0;
         }
-
-        if (isFocus) {
-          tickPlayer.seekTo(0).catch(() => { });
-          tickPlayer.volume = 0.4;
-          tickPlayer.play();
-        }
         return prev - 1;
       });
     }, 1000);
@@ -240,7 +255,7 @@ export function HomeScreen() {
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [isRunning, isFocus, focusTime, breakTime, stopCountdown, tickPlayer, handleTimerComplete]);
+  }, [isRunning, stopCountdown, handleTimerComplete]);
 
   // Format
   const minutes = Math.floor(timeLeft / 60);
@@ -248,15 +263,16 @@ export function HomeScreen() {
   const displayMinutes = minutes.toString().padStart(2, '0');
   const displaySeconds = seconds.toString().padStart(2, '0');
 
-  const buttonText = isRunning && isFocus
-    ? 'Pause'
-    : isRunning && !isFocus
+  const buttonText =
+    isRunning && isFocus
+      ? 'Pause'
+      : isRunning && !isFocus
       ? 'Skip'
       : !isFocus && isFinished
-        ? 'Break'
-        : isFocus && !isRunning && !isFinished
-          ? 'Resume'
-          : 'Play';
+      ? 'Break'
+      : isFocus && !isRunning && !isFinished
+      ? 'Resume'
+      : 'Play';
 
   return (
     <ThemedView style={styles.container}>
@@ -274,13 +290,17 @@ export function HomeScreen() {
           <ThemedView style={styles.tickTockWrapper} type="backgroundElement">
             <ThemedView style={styles.timeGroup}>
               <ThemedView style={[styles.tickTockView, !isFocus && styles.tickTockViewBreak]}>
-                <ThemedText type="title" style={styles.tickTockText}>{displayMinutes}</ThemedText>
+                <ThemedText type="title" style={styles.tickTockText}>
+                  {displayMinutes}
+                </ThemedText>
               </ThemedView>
             </ThemedView>
 
             <ThemedView style={styles.timeGroup}>
               <ThemedView style={[styles.tickTockView, !isFocus && styles.tickTockViewBreak]}>
-                <ThemedText type="title" style={styles.tickTockText}>{displaySeconds}</ThemedText>
+                <ThemedText type="title" style={styles.tickTockText}>
+                  {displaySeconds}
+                </ThemedText>
               </ThemedView>
             </ThemedView>
           </ThemedView>
@@ -293,13 +313,6 @@ export function HomeScreen() {
             {buttonText}
           </ThemedText>
         </ThemedView>
-
-        {/* <TodaySummaryCard
-          sessions={6}
-          focusMinutes={150}
-          streak={7}
-          goalPercent={60}
-        /> */}
       </SafeAreaView>
     </ThemedView>
   );
@@ -320,13 +333,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     flex: 1,
     paddingHorizontal: Spacing.four,
-    gap: 2
+    gap: 4,
   },
   code: {
+    padding: 12,
     textTransform: 'uppercase',
     fontSize: 20,
     fontWeight: 'bold',
-    marginBottom: 10,
   },
   stepContainer: {
     gap: Spacing.one,

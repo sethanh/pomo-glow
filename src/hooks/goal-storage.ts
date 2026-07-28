@@ -34,7 +34,7 @@ export async function UpdateTargetGoal(target: number) {
 
 export async function getDailyGoal() {
   const value = await AsyncStorage.getItem(DAILY_GOAL_KEY);
-  return Number(value ?? 5);
+  return Number(value ?? 5) || 5;
 }
 
 export async function setDailyGoal(goal: number) {
