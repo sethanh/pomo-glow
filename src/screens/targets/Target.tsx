@@ -4,7 +4,7 @@ import { getAchievements, getDailyProgress, getStreak } from '@/hooks';
 import { getWeeklyGoal } from '@/hooks/week-storage';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { StyleSheet } from 'react-native';
+import { ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AchievementSection, CurrentStreakCard, TargetHeader, TodayGoalCard, WeeklyGoalCard } from './containers';
 
@@ -50,34 +50,36 @@ export function TargetScreen() {
       edges={["top"]}
       style={styles.safeArea}
     >
-
-      <ThemedView style={styles.container}>
-        <TargetHeader />
-        <TodayGoalCard
-          completed={completed}
-          goal={goal}
-          onPressEdit={() => router.navigate('/(popup)/goal')}
-        />
-        <CurrentStreakCard  
-          currentStreak={streak.currentStreak}
-          bestStreak={streak.bestStreak}
-        />
-        <WeeklyGoalCard
-          completed={weekly.completed}
-          goal={weekly.goal}
-        />
-        <AchievementSection
-          data={achievement}
-         />
-      </ThemedView>
+      <ScrollView contentContainerStyle={styles.containerScroll}>
+        <ThemedView style={styles.container}>
+          <TargetHeader />
+          <TodayGoalCard
+            completed={completed}
+            goal={goal}
+            onPressEdit={() => router.navigate('/(popup)/goal')}
+          />
+          <CurrentStreakCard
+            currentStreak={streak.currentStreak}
+            bestStreak={streak.bestStreak}
+          />
+          <WeeklyGoalCard
+            completed={weekly.completed}
+            goal={weekly.goal}
+          />
+          <AchievementSection
+            data={achievement}
+          />
+        </ThemedView>
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  containerScroll: {
+  },
   container: {
-    flex: 1,
-    paddingHorizontal: 12,
+    padding: 12,
     gap: 12,
     position: 'relative'
   },

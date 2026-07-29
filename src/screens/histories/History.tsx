@@ -66,14 +66,13 @@ export function HistoryScreen() {
 
 const styles = StyleSheet.create({
     container: {
-        flex: 1,
         paddingHorizontal: 12,
         alignItems: 'center',
         gap: 12
     },
     safeArea: {
-        flex: 1,
-        backgroundColor: 'white'
+        backgroundColor: 'white',
+        flex: 1
     },
 }
 );
