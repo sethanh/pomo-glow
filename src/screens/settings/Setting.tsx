@@ -6,10 +6,23 @@ import { BREAK_KEY, FOCUS_KEY } from '@/constants';
 import { Spacing } from '@/constants/theme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Image } from 'expo-image';
+import * as Notifications from 'expo-notifications';
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { FormBase } from 'react-hook-form-base';
-import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, StyleSheet } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  AppState,
+  Keyboard,
+  KeyboardAvoidingView,
+  Linking,
+  Platform,
+  StyleSheet,
+  Switch,
+  TouchableWithoutFeedback,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 interface SettingValue {
@@ -17,15 +30,67 @@ interface SettingValue {
   breakTime: number;
 }
 
-
 export function SettingScreen() {
   const [settings, setSettings] = useState<SettingValue>({
     breakTime: 0,
-    focusTime: 0
+    focusTime: 0,
   });
   const [isLoading, setIsLoading] = useState(true);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [notificationStatus, setNotificationStatus] = useState<'granted' | 'denied' | 'undetermined'>('undetermined');
+  const [isCheckingPermission, setIsCheckingPermission] = useState(false);
 
+  // Kiểm tra quyền thông báo
+  const checkNotificationPermission = async () => {
+    try {
+      const { status } = await Notifications.getPermissionsAsync();
+      setNotificationStatus(status);
+    } catch (error) {
+      console.log('Check permission error:', error);
+    }
+  };
+
+  // Yêu cầu quyền thông báo
+  const requestNotificationPermission = async () => {
+    setIsCheckingPermission(true);
+    try {
+      const { status: existingStatus } = await Notifications.getPermissionsAsync();
+
+      if (existingStatus === 'granted') {
+        setNotificationStatus('granted');
+        return;
+      }
+
+      const { status } = await Notifications.requestPermissionsAsync({
+        ios: {
+          allowAlert: true,
+          allowBadge: true,
+          allowSound: true,
+        },
+      });
+
+      setNotificationStatus(status);
+
+      if (status !== 'granted') {
+        Alert.alert(
+          'Permission Required',
+          'To receive notifications when focus or break ends, please enable notifications in Settings.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Open Settings',
+              onPress: () => Linking.openSettings(),
+            },
+          ]
+        );
+      }
+    } catch (error) {
+      console.log('Request notification permission error:', error);
+    } finally {
+      setIsCheckingPermission(false);
+    }
+  };
+
+  // Load settings + check permission khi vào màn hình
   useFocusEffect(
     useCallback(() => {
       const loadSettings = async () => {
@@ -36,31 +101,41 @@ export function SettingScreen() {
 
           setSettings({
             focusTime: parseInt(savedFocus || '25'),
-            breakTime: parseInt(savedBreak || '5')
+            breakTime: parseInt(savedBreak || '5'),
           });
+
+          await checkNotificationPermission();
         } catch (e) {
           console.log('Load settings failed', e);
-        }
-        finally {
+        } finally {
           setIsLoading(false);
         }
       };
 
       loadSettings();
-
-      return () => {
-      };
     }, [])
   );
 
+  // Lắng nghe khi app quay lại từ Settings → reload quyền
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'active') {
+        checkNotificationPermission();
+      }
+    });
 
-  const saveSettings = async ( value : SettingValue ) => {
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
+  const saveSettings = async (value: SettingValue) => {
     try {
       await AsyncStorage.setItem(FOCUS_KEY, value.focusTime.toString());
       await AsyncStorage.setItem(BREAK_KEY, value.breakTime.toString());
-
-      Alert.alert('✅ Successfully', 'Save Successfully!');
+      Alert.alert('✅ Successfully', 'Settings saved successfully!');
     } catch (e) {
+      Alert.alert('Error', 'Failed to save settings');
     }
   };
 
@@ -73,60 +148,95 @@ export function SettingScreen() {
     );
   }
 
+  const isNotificationEnabled = notificationStatus === 'granted';
+
   return (
     <ThemedView style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
-        <KeyboardAvoidingView
-          style={[{
-            flex: 1,
-            width: '100%',
-            alignItems: 'center'
-          }]}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={0}
+        <TouchableWithoutFeedback
+          onPress={Keyboard.dismiss}
+          accessible={false}
         >
-          <ThemedView style={styles.tomatoContainer}>
-          </ThemedView>
+          <KeyboardAvoidingView
+            style={styles.keyboardView}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={0}
+          >
+            <ThemedView style={styles.stepContainer}>
+              <Image style={styles.image} source={require('@/assets/images/pomo.png')} />
+              <ThemedText type="code" style={styles.title}>
+                POMODORO
+              </ThemedText>
 
-          <ThemedView style={styles.stepContainer}>
-                        <Image style={styles.image} source={require('@/assets/images/pomo.png')} />
-            <ThemedText type="code" style={styles.title}>
-              POMODORO
-            </ThemedText>
-            <FormBase
-              onSubmit={saveSettings}
-              defaultValues={{...settings}}
-            >
-              {(_, onHandleSubmit) => {
-                return (<ThemedView style={styles.settingContainer} type="backgroundElement">
-                  <TextInputField
-                    name='focusTime'
-                    labelTranslateCode='Focus time'
-                    placeholder='Focus time'
-                    rules={{
-                      required: 'Field is required'
-                    }}
-                  />
-                  <TextInputField
-                    labelTranslateCode='Break time'
-                    placeholder='Break time'
-                    name='breakTime'
-                    rules={{
-                      required: 'Field is required'
-                    }}
-                  />
-                  <AppButton
-                    onClick={onHandleSubmit}
-                    labelTranslateCode={'Save'}
-                    type='primary'
-                    style={{backgroundColor: '#E23E28', borderColor: '#E23E28'}}
-                  />
-                </ThemedView>);
-              }}
-            </FormBase>
-          </ThemedView>
-        </KeyboardAvoidingView>
+              <FormBase onSubmit={saveSettings} defaultValues={{ ...settings }}>
+                {(_, onHandleSubmit) => (
+                  <ThemedView style={styles.settingContainer} type="backgroundElement">
+                    {/* ===== Notification Permission ===== */}
+                    <View>
+                      <View style={styles.permissionRow}>
+                        <View style={styles.permissionInfo}>
+                          <ThemedText style={styles.permissionLabel}>
+                            Focus & Break Alerts
+                          </ThemedText>
+                        </View>
+                        <Switch
+                          value={isNotificationEnabled}
+                          onValueChange={(value) => {
+                            if (value) {
+                              requestNotificationPermission();
+                            } else {
+                              Alert.alert(
+                                'Disable Notifications',
+                                'To turn off notifications, please go to your device Settings.',
+                                [
+                                  { text: 'Cancel', style: 'cancel' },
+                                  {
+                                    text: 'Open Settings',
+                                    onPress: () => Linking.openSettings(),
+                                  },
+                                ]
+                              );
+                            }
+                          }}
+                          trackColor={{ false: '#767577', true: '#E23E28' }}
+                          thumbColor={isNotificationEnabled ? '#fff' : '#f4f3f4'}
+                          disabled={isCheckingPermission}
+                        />
+                      </View>
+                      <ThemedText style={styles.permissionDesc}>
+                        Get notified when your focus or break time ends.
+                      </ThemedText>
+                    </View>
 
+                    {/* ===== Timer Settings ===== */}
+                    <TextInputField
+                      name="focusTime"
+                      labelTranslateCode="Focus time (minutes)"
+                      placeholder="25"
+                      rules={{ required: 'Field is required' }}
+                      keyboardType="numeric"
+
+                    />
+                    <TextInputField
+                      name="breakTime"
+                      labelTranslateCode="Break time (minutes)"
+                      placeholder="5"
+                      rules={{ required: 'Field is required' }}
+                      keyboardType="numeric"
+                    />
+
+                    <AppButton
+                      onClick={onHandleSubmit}
+                      labelTranslateCode="Save"
+                      type="primary"
+                      style={styles.saveButton}
+                    />
+                  </ThemedView>
+                )}
+              </FormBase>
+            </ThemedView>
+          </KeyboardAvoidingView>
+        </TouchableWithoutFeedback>
       </SafeAreaView>
     </ThemedView>
   );
@@ -136,72 +246,67 @@ const styles = StyleSheet.create({
   center: {
     flex: 1,
     justifyContent: 'center',
-    alignItems: 'center'
-  },
-  container: { flex: 1 },
-  safeArea: { flex: 1, alignItems: 'center', paddingTop: 40, paddingBottom: 40 },
-  tomatoContainer: { marginBottom: 20 },
-  title: { fontSize: 28, fontWeight: 'bold', marginBottom: 30 },
-  timerContainer: { flexDirection: 'row', gap: 40, marginBottom: 40 },
-  timeSection: { alignItems: 'center' },
-  timeLabel: { fontSize: 16, color: '#666', marginBottom: 10 },
-  bigBox: {
-    width: 130,
-    height: 150,
-    backgroundColor: '#1f1f1f',
-    borderRadius: 24,
-    justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 6,
-    borderColor: '#333',
   },
-  activeBox: { backgroundColor: '#E23E28', borderColor: '#E23E28' },
-  bigNumber: { color: 'white', fontSize: 58, fontWeight: '700' },
-  button: {
-    paddingVertical: 16,
-    paddingHorizontal: 60,
-    backgroundColor: '#E23E28',
-    borderRadius: 50,
-    color: 'white',
-    fontSize: 18,
-    fontWeight: 'bold',
-    textAlign: 'center'
+  container: {
+    flex: 1,
   },
-  settingButton: {
-    color: '#666',
-    fontSize: 16,
-    marginTop: 20,
-    borderRadius: Spacing.four,
+  safeArea: {
+    flex: 1,
+    alignItems: 'center',
+    paddingTop: 40,
+    paddingBottom: 40,
+  },
+  keyboardView: {
+    flex: 1,
+    width: '100%',
+    alignItems: 'center',
   },
   stepContainer: {
     alignSelf: 'stretch',
     padding: 24,
     alignItems: 'center',
     justifyContent: 'flex-end',
-    flex: 1
+    flex: 1,
   },
   settingContainer: {
     width: '100%',
-    gap: 24,
+    gap: 20,
     padding: 24,
     borderRadius: Spacing.four,
   },
-  input: {
-    borderWidth: 1,
-    borderColor: '#ccc',
-    backgroundColor: 'white',
-    padding: 12,
-    borderRadius: 8,
-    width: '100%',
-    textAlign: 'center',
-    fontSize: 18,
-    marginBottom: 15,
-  },
-  labelInput: {
-    textAlign: 'left'
+  title: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    marginBottom: 30,
   },
   image: {
     width: 76,
     height: 71,
+    marginBottom: 12,
+  },
+  saveButton: {
+    backgroundColor: '#E23E28',
+    borderColor: '#E23E28',
+  },
+  permissionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 16,
+  },
+  permissionInfo: {
+    flex: 1,
+  },
+  permissionLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  permissionDesc: {
+    fontSize: 13,
+    opacity: 0.7,
+    lineHeight: 18,
+    marginTop: 4,
   },
 });

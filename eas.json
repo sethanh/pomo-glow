@@ -16,7 +16,10 @@
       "env": {
         "ENVFILE": ".env.production"
       },
-      "channel": "production"
+      "channel": "production",
+      "android": {
+        "buildType": "app-bundle"
+      }
     }
   },
   "submit": {
@@ -25,6 +28,11 @@
         "appleId": "hanctnet@gmail.com",
         "ascAppId": "6744683718",
         "appleTeamId": "J3YAF8LN9G"
+      },
+      "android": {
+        "serviceAccountKeyPath": "./google-service-account.json",
+        "track": "internal",
+        "releaseStatus": "draft"
       }
     }
   }

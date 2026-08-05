@@ -1,7 +1,7 @@
 import { AudioModule, useAudioPlayer } from 'expo-audio';
 import * as Notifications from 'expo-notifications';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AppState, StyleSheet } from 'react-native';
+import { Alert, AppState, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
@@ -189,7 +189,38 @@ export function HomeScreen() {
     }, [isFinished, isFocus])
   );
 
+  const ensureNotificationPermission = useCallback(async () => {
+    const { status: existingStatus } = await Notifications.getPermissionsAsync();
+    if (existingStatus === 'granted') return;
+
+    // Show explanation before the system permission prompt
+    await new Promise<void>((resolve) => {
+      Alert.alert(
+        'Notifications',
+        'You need permission to receive notifications when PomoGlow ends.',
+        [
+          {
+            text: 'Skip',
+            style: 'cancel',
+            onPress: () => resolve(),
+          },
+          {
+            text: 'Allow',
+            onPress: async () => {
+              await Notifications.requestPermissionsAsync();
+              resolve();
+            },
+          },
+        ]
+      );
+    });
+  }, []);
+
   const startCountdown = useCallback(async () => {
+    console.log(isFocus, isFinished);
+    if (isFocus && isFinished) {
+      await ensureNotificationPermission();
+    }
     const seconds = timeLeft > 0 ? timeLeft : (isFocus ? focusTime : breakTime) * 60;
 
     setTimeLeft(seconds);
@@ -200,7 +231,7 @@ export function HomeScreen() {
 
     // Schedule notification chính xác
     await scheduleEndNotification(seconds, !isFocus);
-  }, [timeLeft, isFocus, focusTime, breakTime]);
+  }, [timeLeft, isFocus, focusTime, breakTime, isFinished]);
 
   const stopCountdown = useCallback(async () => {
     if (intervalRef.current) {
@@ -226,7 +257,7 @@ export function HomeScreen() {
 
     setTimeLeft(focusTime * 60);
     setIsFocus(true);
-    setIsFinished(false);
+    setIsFinished(true);
   }, [focusTime, breakTime, stopCountdown]);
 
   const toggleCountdown = useCallback(() => {
@@ -353,10 +384,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 24,
+    borderRadius: 12,
   },
   timeGroup: {
     alignItems: 'center',
     gap: 6,
+    borderRadius: 12,
   },
   tickTockView: {
     width: 84,

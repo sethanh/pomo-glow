@@ -9,7 +9,7 @@ import { Image } from 'expo-image';
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { FormBase } from 'react-hook-form-base';
-import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, StyleSheet } from 'react-native';
+import { ActivityIndicator, Alert, Keyboard, KeyboardAvoidingView, Platform, StyleSheet, TouchableWithoutFeedback } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 interface GoalValue {
@@ -19,7 +19,7 @@ interface GoalValue {
 
 
 export function GoalForm() {
-  const [ defaultValue, setDefaultValue] = useState<GoalValue>({
+  const [defaultValue, setDefaultValue] = useState<GoalValue>({
     weekGoal: 40,
     goal: 5
   });
@@ -30,14 +30,14 @@ export function GoalForm() {
       const loadSettings = async () => {
         setIsLoading(true);
         try {
-            const [progress, weeklyGoal] = await Promise.all([
-                getDailyProgress(),
-                getWeeklyGoal()
-            ]);
-            setDefaultValue({
-                goal: progress.goal,
-                weekGoal: weeklyGoal.goal
-            })
+          const [progress, weeklyGoal] = await Promise.all([
+            getDailyProgress(),
+            getWeeklyGoal()
+          ]);
+          setDefaultValue({
+            goal: progress.goal,
+            weekGoal: weeklyGoal.goal
+          })
         } catch (e) {
           console.log('Load settings failed', e);
         }
@@ -54,7 +54,7 @@ export function GoalForm() {
   );
 
 
-  const saveSettings = async ( value : GoalValue ) => {
+  const saveSettings = async (value: GoalValue) => {
     try {
       await UpdateTargetGoal(value.goal);
       await UpdateWeeklyTarget(value.weekGoal);
@@ -76,58 +76,62 @@ export function GoalForm() {
   return (
     <ThemedView style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
-        <KeyboardAvoidingView
-          style={[{
-            flex: 1,
-            width: '100%',
-            alignItems: 'center'
-          }]}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={0}
+        <TouchableWithoutFeedback
+          onPress={Keyboard.dismiss}
+          accessible={false}
         >
-          <ThemedView style={styles.tomatoContainer}>
-           
-          </ThemedView>
+          <KeyboardAvoidingView
+            style={[{
+              flex: 1,
+              width: '100%',
+              alignItems: 'center'
+            }]}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={0}
+          >
+            <ThemedView style={styles.tomatoContainer}>
 
-          <ThemedView style={styles.stepContainer}>
-             <Image style={styles.image} source={require('@/assets/images/pomo.png')} />
-            <ThemedText type="code" style={styles.title}>
-              Setting Target
-            </ThemedText>
-            <FormBase
-              onSubmit={saveSettings}
-              defaultValues={defaultValue}
-            >
-              {(_, onHandleSubmit) => {
-                return (<ThemedView style={styles.settingContainer} type="backgroundElement">
-                  <TextInputField
-                    name='goal'
-                    labelTranslateCode='Target Goal for day'
-                    placeholder='number'
-                    rules={{
-                      required: 'Field is required'
-                    }}
-                  />
-                  <TextInputField
-                    labelTranslateCode='Target Goal for week'
-                    placeholder='number'
-                    name='weekGoal'
-                    rules={{
-                      required: 'Field is required'
-                    }}
-                  />
-                  <AppButton
-                    onClick={onHandleSubmit}
-                    labelTranslateCode={'Save'}
-                    type='primary'
-                    style={{backgroundColor: '#E23E28', borderColor: '#E23E28'}}
-                  />
-                </ThemedView>);
-              }}
-            </FormBase>
-          </ThemedView>
-        </KeyboardAvoidingView>
+            </ThemedView>
 
+            <ThemedView style={styles.stepContainer}>
+              <Image style={styles.image} source={require('@/assets/images/pomo.png')} />
+              <ThemedText type="code" style={styles.title}>
+                Setting Target
+              </ThemedText>
+              <FormBase
+                onSubmit={saveSettings}
+                defaultValues={defaultValue}
+              >
+                {(_, onHandleSubmit) => {
+                  return (<ThemedView style={styles.settingContainer} type="backgroundElement">
+                    <TextInputField
+                      name='goal'
+                      labelTranslateCode='Target Goal for day'
+                      placeholder='number'
+                      rules={{
+                        required: 'Field is required'
+                      }}
+                    />
+                    <TextInputField
+                      labelTranslateCode='Target Goal for week'
+                      placeholder='number'
+                      name='weekGoal'
+                      rules={{
+                        required: 'Field is required'
+                      }}
+                    />
+                    <AppButton
+                      onClick={onHandleSubmit}
+                      labelTranslateCode={'Save'}
+                      type='primary'
+                      style={{ backgroundColor: '#E23E28', borderColor: '#E23E28' }}
+                    />
+                  </ThemedView>);
+                }}
+              </FormBase>
+            </ThemedView>
+          </KeyboardAvoidingView>
+        </TouchableWithoutFeedback>
       </SafeAreaView>
     </ThemedView>
   );
